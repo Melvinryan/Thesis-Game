@@ -1,5 +1,6 @@
-import pygame
 from os import path
+
+import pygame
 
 
 # Static methods
@@ -28,7 +29,8 @@ def populate_assets():
 	assets = []
 	# Open the tilesheet
 	# colored_packed.png is 16x16, currently is hardcoded to this file
-	sheet = pygame.image.load(path.join(path.dirname(__file__), 'assets/visual/Tilesheet/colored_transparent_packed.png'))
+	sheet = pygame.image.load(path.join(path.dirname(__file__),
+										'assets/visual/Tilesheet/colored_transparent_packed.png'))
 	# index = 0  # is used to know how many iterations we have done (x*22+y = index)
 	for x in range(48):
 		for y in range(22):
@@ -49,17 +51,44 @@ def get_name(index):
 	# A python switch case
 	# TODO: fully populate names (only 1056 lol)
 	switch = {
+		# Column 0
 		0: "empty",
 		1: "tree1",
-		23: "stone1",
-		45: "stone2",
-		67: "stone3",
-		89: "stone4",
-		111: "grass1",
-		133: "grass2",
-		155: "grass3",
+		# Column 1
+		22: "stone1",
+		# Column 2
+		44: "stone2",
+		# Column 3
+		66: "stone3",
+		67: "forest",
+		# Column 4
+		88: "stone4",
+		# Column 5
+		110: "grass1",
+		111: "cactus",
+		# Column 6
+		132: "grass2",
+		# Column 7
+		154: "grass3",
+		155: "cacti",
+		# Column 8
+		180: "river",
+		181: "water_full_tile",
+		# Column 9
+		202: "river_bend",
+		203: "river_bank",
+		# Column 18
 		394: "wall1",
-		550: "player1"
+		# Column 24
+		528: "mage1",
+		529: "mage2",
+		530: "mage3",
+		# Column 25
+		550: "player1",
+		551: "player2",
+		552: "player3",
+		787: "number0",
+		931: "axe"
 	}
 	return switch.get(index, "unkown")
 
@@ -69,7 +98,6 @@ class Asset:
 		"""
 		:param str name: The name identifier of the asset
 		:param pygame.surface.Surface img: The image of the asset
-
 		"""
 		self.name = name
 		self.image = img
