@@ -1,27 +1,43 @@
-import pygame
-from pygame.locals import *
-from settings import *
-from sprites import *
-from os import path
-import sys
+import ctypes
 import getopt
-import tilemap
-import assets
-# from os import system
-# system('cls')
+import sys
+import threading
+from configparser import ConfigParser
+from os import path
+
+from cfg.cfgparser import CfgParser
+from core.console.consolefunctions import ConsoleFunctions
+from core.controller.camera import Camera
+from core.input.inputhandler import InputHandler
+from core.prefabs.sprites import *
+from settings import *
+from world.chunk import Chunk
+from world.entity.entities.player import Player
+from world.entity.entitytypes import EntityTypes
+from world.material.material import Material
+from world.material.materials import Materials
+from world.spawner import Spawner
+from world.world import World
 
 # TODO: make this better lol
-# Check arguments
+# Check console-line arguments
 try:
 	opts, args = getopt.getopt(sys.argv[1:], 'f', ["fps="])
 except getopt.GetoptError as err:
-	print(err)
+	Console.log(thread="Player",
+				message=err)
 	sys.exit()
 for o, a in opts:
 	if o == '--fps':
 		FPS = a
 
-print('FPS is: ', FPS)
+# If the platform is Windows (win32) we need to load a kernal module and set the mode so we can have colored output
+if platform == "win32":
+	kernel32 = ctypes.windll.kernel32
+	kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+
+if not os.path.isdir("saves"):
+	os.mkdir("saves")
 
 
 class Game:
@@ -31,68 +47,126 @@ class Game:
 		pygame.display.set_caption(TITLE)
 		self.clock = pygame.time.Clock()
 		pygame.key.set_repeat(1, 100)
-		self.load_data()
 		self.graphics = assets.populate_assets()
-		# TODO: for loop to populate assets
+		self.load_data()
+		self.world = None
+
+		# Make input handler
+		self.inputHandler = InputHandler(self)
+		# Make console
+		self.console = ConsoleFunctions(self)
+		self.consoleThread = threading.Thread(name="console", target=self.console.run, daemon=True)
 
 	def load_data(self):
 		game_folder = path.dirname(__file__)
 		assets_folder = path.join(game_folder, 'assets')
-		self.map = tilemap.Map(path.join(game_folder, 'saves/map3.txt'))
-		# self.player_img = pygame.image.load(path.join(assets_folder, 'visual/')).convert_alpha()
-		# self.player_img = pygame.transform.scale(assets.get_asset_from_name(self.graphics, 'player1').image, (64, 64))
+		Materials.load(self)
+		EntityTypes.load(self)
+
+		# Initialize config
+		self.cpc = ConfigParser()  # ConfigParserControls
+		self.cpc.read(path.join(path.dirname(__file__), 'cfg/settings.ini'))
+		cfgp = CfgParser(self, path.join(game_folder, 'cfg/autoexec.cfg'))
+		cfgp.read()
 
 	def new(self):
-		# initialize all variables and do all the setup for a new game
+		# Initialize all variables and do all the setup for a new game
 		self.sprites = pygame.sprite.Group()
 		self.walls = pygame.sprite.Group()
 		self.trees = pygame.sprite.Group()
-		for row, tiles in enumerate(self.map.data):
-			for col, tile in enumerate(tiles):
-				if tile == '1':
-					Wall(self, col, row)
-				if tile == 'P':
-					self.player = Player(self, 20, 20, 0, 350, col, row)
-				if tile == 'T':
-					Tree(self, col, row)
-		Enemy_standard(self, 20, 20, 0, 350, 4, 4)
+		self.world = World(path.join(path.dirname(__file__), "saves/world1"), self)
+		self.world.load()
+		self.player = Player(self, 100, 100, 0, 350, 0.5, 0.5, EntityTypes.PLAYER.value, 5)
+		self.spawner = Spawner(self, 64, 1)
+
 		# Initialize camera map specific
 		# TODO: might have to change the camera's settings
-		self.camera = tilemap.Camera(self.map.width, self.map.height)
-		self.items = item.populate_items()
+		self.camera = Camera()
+		# self.camera = Camera(80, 80)  # Same as render distance?
+		# self.items = item.populate_items(self.graphics)
+
+		UI.load(self)
+
+		# Start the console
+		self.consoleThread.start()
+		Console.log(thread="MAIN", message="Reading console input.")
 
 	def run(self):
 		# game loop - set self.playing = False to end the game
 		self.playing = True
 		while self.playing:
-			self.dt = self.clock.tick(FPS) / 1000
-			self.events()
-			self.update()
-			self.draw()
+			try:
+				self.dt = self.clock.tick(FPS) / 1000
+				self.events()
+				self.update()
+				self.draw()
+			except pygame.error:
+				# TODO: Improve error handling to not skip steps on error
+				Console.error(thread="UnknownThread", message=pygame.get_error())
 
 	def quit(self):
+		self.console.kill()
 		pygame.quit()
 		sys.exit()
 
 	def update(self):
 		# update portion of the game loop
+		self.inputHandler.handleInput()
 		self.sprites.update()
-		self.camera.update(self.player)
-
-	def draw_grid(self):
-		for x in range(0, WIDTH, TILESIZE):
-			pygame.draw.line(self.screen, LIGHTGREY, (x, 0), (x, HEIGHT))
-		for y in range(0, HEIGHT, TILESIZE):
-			pygame.draw.line(self.screen, LIGHTGREY, (0, y), (WIDTH, y))
+		for ent in self.world.entities:
+			ent.update()
+		self.player.update()
+		self.camera.update(self.player.entitytype)
+		self.world.tick()
 
 	def draw(self):
-		pygame.display.set_caption(TITLE + " - " + "{:.2f}".format(self.clock.get_fps()))
+		# Console.debug(self.player.pos)
+		pygame.display.set_caption(TITLE + " - " + "{:.2f}".format(self.clock.get_fps()) +
+								   " - ({:.4f}, {:.4f})".format(*self.player.pos))
 		self.screen.fill(BGCOLOR)
-		self.draw_grid()
-		for sprite in self.sprites:
-			self.screen.blit(sprite.image, self.camera.apply(sprite))
-		pygame.draw.rect(self.screen, (255, 255, 255), self.camera.apply(self.player), 2)
-		pygame.draw.rect(self.screen, (255, 255, 255), self.player.collision_rect, 2)
+
+		pcx = self.player.pos.x // 16
+		pcy = self.player.pos.y // 16
+
+		# Console.debug((self.player.pos.x / TILESIZE, self.player.pos.y / TILESIZE))
+
+		# print(f"Player pos: {self.player.pos.x / TILESIZE:.2f}, {self.player.pos.y / TILESIZE:.2f}")
+		# TODO: add setting for "render distance"
+		for cy in range(-2, 3):
+			for cx in range(-2, 3):
+				# Console.debug(f"Rendering {pcx + cx, pcy + cy}")
+				chunk: Chunk = self.world.getChunkAt(pcx + cx, pcy + cy)
+				# print(f"Rendering chunk: {px+cx},{py+cy}")
+				for y in range(16):
+					for x in range(16):
+						mat: Material = chunk.getBlock(x, y).material
+						if mat is not None and mat.image is not None:
+							self.screen.blit(mat.image, self.camera.applyraw(
+								mat.rect.move(((pcx + cx) * 16 + x) * TILESIZE, ((pcy + cy) * 16 + y) * TILESIZE)))
+
+		# pygame.draw.rect(self.screen, (255, 255, 255), self.camera.applyraw(self.player.collision_rect), 1)
+
+		for ent in self.world.entities:
+			if ent is not None and ent.entitytype.image is not None:
+				# Console.debug(f"ent: {ent.pos}, {ent.chunk}")
+				self.screen.blit(ent.entitytype.image, self.camera.applyraw(
+					ent.entitytype.rect.move((ent.chunk[0] * 16 + ent.pos.x) * TILESIZE,
+											 (ent.chunk[1] * 16 + ent.pos.y) * TILESIZE)
+				))
+
+		self.screen.blit(self.player.entitytype.image, self.camera.apply(self.player.entitytype))
+
+		# Display UI
+		UI.draw(self.screen)
+
+		# Collision debug rects
+		# self.screen.blit(Materials.GRASS.value.image,self.camera.apply(self.player))
+		# for sprite in self.sprites:
+		#	self.screen.blit(sprite.image, self.camera.apply(sprite))
+
+		# Collision debug rects
+		# pygame.draw.rect(self.screen, (255, 255, 255), self.camera.apply(self.player), 2)
+		# pygame.draw.rect(self.screen, (255, 255, 255), self.player.collision_rect, 2)
 		pygame.display.flip()
 
 	def events(self):
@@ -146,9 +220,9 @@ class Game:
 			else:
 				pygame.draw.rect(self.screen, (100, 100, 100), bOptions)
 
-			self.screen.blit(tQuit, (bQuit.x+30, bQuit.y+5))
-			self.screen.blit(tPlay, (bPlay.x+30, bPlay.y+5))
-			self.screen.blit(tOptions, (bOptions.x, bOptions.y+5))
+			self.screen.blit(tQuit, (bQuit.x + 30, bQuit.y + 5))
+			self.screen.blit(tPlay, (bPlay.x + 30, bPlay.y + 5))
+			self.screen.blit(tOptions, (bOptions.x, bOptions.y + 5))
 			pygame.display.update()
 			self.clock.tick(60)
 
@@ -161,8 +235,12 @@ class Game:
 
 # create the game object
 g = Game()
-g.show_start_screen()
+# g.show_start_screen()
+g.new()
 while True:
-	g.new()
-	g.run()
+	try:
+		g.run()
+	except pygame.error as err:
+		# TODO: Decide where to do error handling
+		Console.error(message=err)
 	g.show_go_screen()
